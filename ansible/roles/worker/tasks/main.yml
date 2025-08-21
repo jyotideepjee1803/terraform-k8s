@@ -1,0 +1,6 @@
+- name: Reset kubeadm (ignore preflight errors)
+  command: kubeadm reset --force --ignore-preflight-errors=all
+  ignore_errors: yes
+
+- name: Join the cluster
+  command: "{{hostvars[groups['master'][0]].kube_join_command}}"

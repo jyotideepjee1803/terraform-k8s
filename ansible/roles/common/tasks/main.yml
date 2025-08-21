@@ -1,0 +1,92 @@
+- name: Disable swap
+  shell: |
+    if grep -q 'swap' /proc/swaps; then
+      swapoff -a
+    fi
+  args:
+    executable: /bin/bash
+
+- name: Ensure swap is disabled
+  replace: 
+    path: /etc/fstab
+    regexp: '(^[^#].*\sswap\s)'
+    replace: '# \1'
+
+- name: Load kernel modules
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: Modprobe overlay and br_netfilter
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: [overlay, br_netfilter]
+
+- name: Sysctl params
+  copy:
+    dest: /etc/sysctl.d/k8s.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+
+- name: Apply sysctl
+  command: sysctl --system
+
+- name: Install CRI-O requirements
+  apt: 
+    name: 
+      - software-properties-common
+      - curl
+      - apt-transport-https
+      - ca-certificates
+      - gpg
+    update_cache: yes
+
+- name: Add CRI-O apt key
+  shell: |
+    curl -fsSL https://pkgs.k8s.io/addons:/cri-o:/prerelease:/main/deb/Release.key \
+    | gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
+  args: { creates: /etc/apt/keyrings/cri-o-apt-keyring.gpg }
+
+- name: Add CRI-O repo
+  copy: 
+    dest: /etc/apt/sources.list.d/cri-o.list
+    content: "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://pkgs.k8s.io/addons:/cri-o:/prerelease:/main/deb/ /"
+
+- name: Install CRI-O 
+  apt: 
+    name: cri-o
+    update_cache: yes
+
+- name: Enable and start CRI-O
+  systemd:
+    name: crio
+    state: started
+    enabled: yes
+
+# ---- Kubernetes apt repo & packages ----
+- name: Add Kubernetes apt key
+  shell: |
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ kubernetes_version_apt_line }}/deb/Release.key \
+    | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  args: { creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg }
+
+- name: Add Kubernetes apt repo
+  copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    content: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ kubernetes_version_apt_line }}/deb/ /"
+
+- name: Install kubelet, kubeadm, kubectl (pinned)
+  apt:
+    name:
+      - "kubelet={{ kube_pkg_version }}"
+      - "kubeadm={{ kube_pkg_version }}"
+      - "kubectl={{ kube_pkg_version }}"
+    update_cache: yes
+
+- name: Enable kubelet
+  systemd: { name: kubelet, state: started, enabled: yes }

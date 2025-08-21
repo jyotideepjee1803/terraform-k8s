@@ -1,0 +1,36 @@
+- name: Pre-pull images
+  command: kubeadm config images pull
+
+- name: Initialize control plane
+  command: kubeadm init 
+  args: 
+    creates: /etc/kubernetes/admin.conf
+
+- name: Ensure .kube directory exists
+  file:
+    path: /home/ubuntu/.kube
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: 0755
+
+- name: Copy admin.conf to ubuntu's kube config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/ubuntu/.kube/config
+    remote_src: yes
+    owner: ubuntu
+    group: ubuntu
+    mode: 0644
+
+- name: Install Calico CNI
+  become_user: ubuntu
+  command: kubectl apply -f {{ calico_manifest }}
+
+- name: Get join command
+  command: kubeadm token create --print-join-command
+  register: join_command
+
+- name: Save join command for workers
+  set_fact:
+    kube_join_command: "{{ join_command.stdout }} --v=5"
